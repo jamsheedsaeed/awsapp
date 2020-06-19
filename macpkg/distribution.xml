@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<installer-gui-script minSpecVersion="1">
+    <pkg-ref id="com.amazon.aws.cli2"/>
+    <title>AWS Command Line Interface</title>
+    <license file="LICENSE.txt" />
+    <readme file="README.html" mimetype="text/html" />
+    <domains enable_anywhere="true" enable_currentUserHome="true" enable_localSystem="true" />
+    <options customize="always" require-scripts="false" />
+    <choices-outline>
+      <line choice="default"/>
+    </choices-outline>
+    <choice title="AWS CLI v2" id="default" customLocation="/usr/local">
+        <pkg-ref id="com.amazon.aws.cli2"/>
+    </choice>
+    <pkg-ref id="com.amazon.aws.cli2">aws-cli.pkg</pkg-ref>
+</installer-gui-script>

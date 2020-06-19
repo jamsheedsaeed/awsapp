@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+EXE_NAME="aws"
+COMPLETER_EXE_NAME="aws_completer"
+PATH_TO_INSTALL="$2/aws-cli"
+METADATA_PATH="$PATH_TO_INSTALL/.install-metadata"
+SYMLINK_DIR="/usr/local/bin"
+ID=$(id -u)
+
+# Only install symlinks if we are installing with root permissions
+# this means we selected the install for everyone option.
+if [ "$ID" == "0" ]; then
+    echo "Global install detected. Installing symlinks in $SYMLINK_DIR."
+    sudo mkdir -p "$SYMLINK_DIR"
+    sudo echo "$METADATA_PATH" >> "$METADATA_PATH"
+
+    AWS_PATH="$PATH_TO_INSTALL/$EXE_NAME"
+    AWS_LINK="$SYMLINK_DIR/$EXE_NAME"
+    echo "Linking $AWS_LINK -> $AWS_PATH"
+    sudo ln -sf "$AWS_PATH" "$AWS_LINK"
+    sudo echo "$AWS_LINK" >> "$METADATA_PATH"
+
+
+    COMPLETER_PATH="$PATH_TO_INSTALL/$COMPLETER_EXE_NAME"
+    COMPLETER_LINK="$SYMLINK_DIR/$COMPLETER_EXE_NAME"
+    echo "Linking $COMPLETER_LINK -> $COMPLETER_PATH"
+    sudo ln -sf "$COMPLETER_PATH" "$COMPLETER_LINK"
+    sudo echo "$COMPLETER_LINK" >> "$METADATA_PATH"
+fi

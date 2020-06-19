@@ -1,0 +1,146 @@
+#!/usr/bin/env python
+"""Script to run smoke tests on aws cli packaged installers"""
+import argparse
+import sys
+import os
+import re
+import shutil
+import tempfile
+
+SCRIPTS_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.append(SCRIPTS_DIR)
+
+from utils import run, tmp_dir, extract_zip
+
+REPO_ROOT = os.path.dirname(SCRIPTS_DIR)
+DIST_DIR = os.path.join(REPO_ROOT, 'dist')
+SMOKE_TEST_PATH = os.path.join(
+    REPO_ROOT, 'tests', 'integration', 'test_smoke.py')
+UNINSTALL_MAC_PKG_PATH = os.path.join(
+    SCRIPTS_DIR, 'installers', 'uninstall-mac-pkg')
+EXE_NAME = 'aws'
+
+
+class InstallerTester(object):
+    DEFAULT_INSTALLER_LOCATION = None
+
+    def __init__(self, installer_location=None):
+        self._installer_location = installer_location
+        if self._installer_location is None:
+            self._installer_location = self.DEFAULT_INSTALLER_LOCATION
+
+    def __call__(self):
+        try:
+            self.setup()
+            return self.test()
+        finally:
+            self.cleanup()
+
+    def get_aws_cmd(self):
+        raise NotImplementedError('get_aws_cmd()')
+
+    def setup(self):
+        pass
+
+    def test(self):
+        env = os.environ.copy()
+        aws_cmd = self.get_aws_cmd()
+        self._assert_aws_cmd(aws_cmd)
+        sys.stdout.write('Setting test command to "%s"\n' % aws_cmd)
+        env['AWS_TEST_COMMAND'] = aws_cmd
+        run('nosetests -v -s %s' % SMOKE_TEST_PATH, env=env)
+        return 0
+
+    def cleanup(self):
+        pass
+
+    def _assert_aws_cmd(self, aws_cmd):
+        # Do a quick --version check to make sure we can execute
+        # the provided command
+        run('%s --version' % aws_cmd)
+
+
+class ExeTester(InstallerTester):
+    DEFAULT_INSTALLER_LOCATION = os.path.join(DIST_DIR, 'awscli-exe.zip')
+
+    def __init__(self, installer_location=None):
+        self._installation_dir = None
+        self._bin_dir = None
+        super(ExeTester, self).__init__(installer_location=installer_location)
+
+    def setup(self):
+        self._installation_dir = tempfile.mkdtemp()
+        install_dir = os.path.join(self._installation_dir, 'aws-cli')
+        self._bin_dir = os.path.join(self._installation_dir, 'bin')
+        self._run_install_script(install_dir, self._bin_dir)
+
+    def _run_install_script(self, install_dir, bin_dir):
+        with tmp_dir() as workdir:
+            extract_zip(self._installer_location, workdir)
+            install_script = os.path.join(workdir, 'aws', 'install')
+            run(
+                '%s --install-dir %s --bin-dir %s' % (
+                    install_script, install_dir, bin_dir
+                )
+            )
+
+    def cleanup(self):
+        shutil.rmtree(self._installation_dir)
+
+    def get_aws_cmd(self):
+        return os.path.join(self._bin_dir, EXE_NAME)
+
+
+class PkgTester(InstallerTester):
+    DEFAULT_INSTALLER_LOCATION = os.path.join(DIST_DIR, 'AWS-CLI-Installer.pkg')
+    _PKG_ID = 'com.amazon.aws.cli2'
+
+    def get_aws_cmd(self):
+        value = run('%s %s check' % (sys.executable, UNINSTALL_MAC_PKG_PATH))
+        match = re.search('installed at (.+)?\n', value)
+        base_path = match.group(1)
+        cmd_path = os.path.join(base_path, EXE_NAME)
+        return cmd_path
+
+    def setup(self):
+        run('sudo installer -pkg %s -target /' % self._installer_location)
+
+    def cleanup(self):
+        run('sudo %s %s uninstall' % (sys.executable, UNINSTALL_MAC_PKG_PATH))
+
+    def __call__(self):
+        assert os.geteuid() == 0, \
+            'Mac PKG installer must be run as root (with sudo).'
+        super(PkgTester, self).__call__()
+
+
+def main():
+    installer_to_tester_cls = {
+        'exe': ExeTester,
+        'pkg': PkgTester,
+    }
+    parser = argparse.ArgumentParser(usage=__doc__)
+    parser.add_argument(
+        '--installer-type', required=True,
+        choices=installer_to_tester_cls.keys(),
+        help='The type of installer to test'
+    )
+    parser.add_argument(
+        '--installer-path',
+        help=(
+            'The path to the installer to test. By default, installers are '
+            'used from the dist directory.'
+        )
+    )
+    args = parser.parse_args()
+    tester = installer_to_tester_cls[args.installer_type](
+        args.installer_path)
+    return tester()
+
+
+if __name__ == '__main__':
+    try:
+        sys.exit(main())
+    except AssertionError as e:
+        print(e)
+        sys.exit(1)
